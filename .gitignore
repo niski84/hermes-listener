@@ -1,0 +1,20 @@
+# binary + runtime
+hermes-listener
+hermes-listener.pid
+*.log
+
+# secrets — never commit
+.env
+.env.local
+
+# build artifacts
+bin/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
