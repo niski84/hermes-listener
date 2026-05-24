@@ -1,6 +1,6 @@
-# binary + runtime
-hermes-listener
-hermes-listener.pid
+# binary + runtime (root-level only — anchored to repo root with leading slash)
+/hermes-listener
+/hermes-listener.pid
 *.log
 
 # secrets — never commit
