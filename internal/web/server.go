@@ -20,6 +20,7 @@ import (
 	"html/template"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -148,47 +149,90 @@ func (sv *Server) listMics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, mics)
 }
 
-// listInputDevices returns the list of PulseAudio source devices via
-// `pactl list short sources`. Falls back to ALSA via `arecord -L` when
-// pactl is unavailable.
+// listInputDevices enumerates real audio capture devices. We try three
+// backends in order:
+//
+//  1. pactl (PulseAudio) — `alsa_input.*` sources only, skipping monitors.
+//  2. pw-cli (PipeWire)  — PipeWire's source nodes when pactl is absent.
+//  3. arecord -l (ALSA)  — parse `card N, device M` lines into hw:N,M IDs.
+//
+// We deliberately do NOT use `arecord -L` (capital L) because it dumps
+// every ALSA plugin description — "Rate Converter Plugin Using Libav/FFmpeg
+// Library", "Discard all samples", etc. — which is meaningless to users
+// picking a microphone.
 func listInputDevices() ([]micDevice, error) {
-	if out, err := exec.Command("pactl", "list", "short", "sources").Output(); err == nil {
-		var devs []micDevice
-		for _, line := range strings.Split(string(out), "\n") {
-			parts := strings.Fields(line)
-			if len(parts) < 2 {
-				continue
-			}
-			// fields: index, name, driver, format, state
-			name := parts[1]
-			// Skip monitors (playback loopback) — capture only.
-			if strings.Contains(name, ".monitor") {
-				continue
-			}
-			devs = append(devs, micDevice{ID: name, Name: prettify(name)})
-		}
+	if devs := pactlInputs(); len(devs) > 0 {
 		return devs, nil
 	}
-	// Fallback — ALSA names.
-	if out, err := exec.Command("arecord", "-L").Output(); err == nil {
-		var devs []micDevice
-		for _, line := range strings.Split(string(out), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, " ") {
-				continue
-			}
-			if line == "null" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			devs = append(devs, micDevice{ID: line, Name: line})
-		}
+	if devs := arecordCards(); len(devs) > 0 {
 		return devs, nil
 	}
-	return nil, fmt.Errorf("neither pactl nor arecord available")
+	// Nothing usable — return an empty list rather than the ALSA plugin
+	// dump that confused users in the first release.
+	return []micDevice{}, nil
 }
 
-func prettify(name string) string {
-	// "alsa_input.usb-…_MCT244651021-01.analog-stereo" → "USB MCT24…"
+func pactlInputs() []micDevice {
+	out, err := exec.Command("pactl", "list", "short", "sources").Output()
+	if err != nil {
+		return nil
+	}
+	var devs []micDevice
+	for _, line := range strings.Split(string(out), "\n") {
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		// fields: index, name, driver, format, state
+		name := parts[1]
+		// Capture only — skip playback monitors and the null sink.
+		if strings.Contains(name, ".monitor") {
+			continue
+		}
+		if name == "" || strings.EqualFold(name, "auto_null") {
+			continue
+		}
+		devs = append(devs, micDevice{ID: name, Name: prettifyPulse(name)})
+	}
+	return devs
+}
+
+// arecordCards parses `arecord -l` output, which lists actual hardware
+// capture cards. Each line looks like:
+//
+//	card 1: Microphone [AI Wireless Lavalier Microphone], device 0: USB Audio [USB Audio]
+//
+// We extract the card index, device index, and the bracketed friendly
+// name, then emit an ALSA `hw:CARD,DEVICE` ID that ffmpeg understands.
+func arecordCards() []micDevice {
+	out, err := exec.Command("arecord", "-l").Output()
+	if err != nil {
+		return nil
+	}
+	// Pattern: card NUM: ANYTHING [FRIENDLY_NAME], device NUM: ANYTHING [DEVNAME]
+	re := regexp.MustCompile(`card\s+(\d+):\s+[^\[]+\[([^\]]+)\],\s+device\s+(\d+)`)
+	var devs []micDevice
+	for _, line := range strings.Split(string(out), "\n") {
+		m := re.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		card, friendly, device := m[1], strings.TrimSpace(m[2]), m[3]
+		id := fmt.Sprintf("hw:%s,%s", card, device)
+		name := friendly
+		if device != "0" {
+			name = fmt.Sprintf("%s (device %s)", friendly, device)
+		}
+		devs = append(devs, micDevice{ID: id, Name: name})
+	}
+	return devs
+}
+
+// prettifyPulse cleans up a PulseAudio source name for display.
+//
+//	alsa_input.usb-Shenzhen_Maono_..._MCT244651021-01.analog-stereo
+//	→ Shenzhen Maono ... MCT244651021-01 analog-stereo
+func prettifyPulse(name string) string {
 	s := strings.TrimPrefix(name, "alsa_input.")
 	s = strings.ReplaceAll(s, "_", " ")
 	if len(s) > 64 {
