@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
+	"hermes-listener/internal/settings"
 	"hermes-listener/internal/startup"
+	"hermes-listener/internal/web"
 )
 
 func main() {
@@ -19,29 +21,29 @@ func main() {
 		port = "9120"
 	}
 
+	// .env lives at project root. Use working dir as the anchor when
+	// invoked via systemd we set WorkingDirectory there too.
+	envPath := filepath.Join(".", ".env")
+
+	settingsStore, err := settings.New(envPath)
+	if err != nil {
+		log.Fatalf("[hermes-listener] settings: %v", err)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Wire the capture stack (hub, daily-transcript writer, channel manager,
-	// default mic). The mic starts on its own goroutine inside ChannelManager.
 	audio, err := startup.SetupAudio(ctx)
 	if err != nil {
 		log.Fatalf("[hermes-listener] audio setup failed: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":   "ok",
-			"service":  "hermes-listener",
-			"channels": audio.ChannelManager.List(),
-		})
-	})
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "hermes-listener — passive voice listener\nGET /api/health for status\n")
-	})
+	webSrv, err := web.NewServer(settingsStore, audio.ChannelManager, envPath)
+	if err != nil {
+		log.Fatalf("[hermes-listener] web setup failed: %v", err)
+	}
 
-	server := &http.Server{Addr: ":" + port, Handler: mux}
+	server := &http.Server{Addr: ":" + port, Handler: webSrv.Mux()}
 
 	go func() {
 		log.Printf("[hermes-listener] HTTP ready at http://localhost:%s", port)
@@ -52,14 +54,8 @@ func main() {
 
 	<-ctx.Done()
 	log.Println("[hermes-listener] shutdown signal received")
-	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = server.Shutdown(shutdownCtx)
 	log.Println("[hermes-listener] stopped")
-}
-
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
 }

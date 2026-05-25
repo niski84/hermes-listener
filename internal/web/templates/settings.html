@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>hermes-listener — settings</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/htmx.org@2.0.3" defer></script>
+  <script src="//unpkg.com/alpinejs" defer></script>
+  <style>
+    body { background: #0b0f14; color: #e6edf3; }
+    .card { background: #161b22; border: 1px solid #30363d; }
+    input, select, textarea { background: #0d1117 !important; color: #e6edf3 !important; border-color: #30363d !important; }
+    .badge-ok { background: #1f6f43; color: #d4ffd9; }
+    .badge-bad { background: #6f1f1f; color: #ffd4d4; }
+    .badge-neutral { background: #30363d; color: #adbac7; }
+  </style>
+</head>
+<body class="min-h-screen p-6" x-data="page()">
+
+  <header class="max-w-5xl mx-auto mb-8">
+    <div class="flex items-baseline justify-between">
+      <h1 class="text-3xl font-bold">🎙 hermes-listener</h1>
+      <span class="text-sm text-gray-400">{{.Now}}</span>
+    </div>
+    <p class="text-gray-400 mt-1">Passive voice listener. Mic → text file in your vault.</p>
+  </header>
+
+  <main class="max-w-5xl mx-auto space-y-6">
+
+    <!-- STATUS CARD -->
+    <section class="card rounded-lg p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-xl font-semibold">Status</h2>
+        <button class="btn btn-sm btn-outline" @click="refreshProbes()">⟳ Probe sidecars</button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+        <template x-for="p in probes" :key="p.name">
+          <div class="card rounded p-3">
+            <div class="font-semibold capitalize" x-text="p.name"></div>
+            <div class="text-xs text-gray-400 truncate" x-text="p.url || '(not configured)'"></div>
+            <span class="badge mt-2"
+              :class="p.ok ? 'badge-ok' : (p.url ? 'badge-bad' : 'badge-neutral')"
+              x-text="p.ok ? 'reachable' : (p.url ? 'unreachable' : '—')"></span>
+          </div>
+        </template>
+      </div>
+
+      <div class="mt-5">
+        <h3 class="font-semibold mb-2">Channels</h3>
+        <pre class="text-xs bg-black/30 p-3 rounded overflow-x-auto">{{printf "%+v" .Channels}}</pre>
+      </div>
+    </section>
+
+    <!-- SETTINGS FORM -->
+    <form @submit.prevent="saveSettings()" class="space-y-6">
+
+      <!-- Microphone -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">🎤 Microphone</h2>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="form-control">
+            <span class="label-text mb-1">Device</span>
+            <select name="MIC_DEVICE" class="select select-bordered w-full">
+              <option value="default" {{if eq (orDefault (index .Values "MIC_DEVICE") "default") "default"}}selected{{end}}>system default</option>
+              {{range .Mics}}
+                <option value="{{.ID}}" {{if eq (index $.Values "MIC_DEVICE") .ID}}selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+            <span class="label-text-alt mt-1 text-gray-500">Detected via pactl/arecord. Pick "system default" if you swap mics often.</span>
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">VAD threshold (dB below silence)</span>
+            <input type="number" name="VAD_THRESHOLD_DB" value="{{orDefault (index .Values "VAD_THRESHOLD_DB") "-30"}}" class="input input-bordered w-full">
+            <span class="label-text-alt mt-1 text-gray-500">Quieter speech needs higher (closer-to-0) values. Default −30.</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Whisper -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">🗣 Whisper (speech-to-text)</h2>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="form-control">
+            <span class="label-text mb-1">Server URL</span>
+            <input type="text" name="WHISPER_URL" value="{{orDefault (index .Values "WHISPER_URL") "http://localhost:9000"}}" class="input input-bordered w-full">
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Provider (future)</span>
+            <select name="WHISPER_PROVIDER" class="select select-bordered w-full" disabled>
+              <option>local (whisper.cpp)</option>
+            </select>
+            <span class="label-text-alt mt-1 text-gray-500">OpenAI / Groq endpoints coming later.</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Vault -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">📚 Vault output</h2>
+        <label class="form-control">
+          <span class="label-text mb-1">Vault root path</span>
+          <input type="text" name="VAULT_PATH" value="{{orDefault (index .Values "VAULT_PATH") "~/Documents/vault"}}" class="input input-bordered w-full">
+          <span class="label-text-alt mt-1 text-gray-500">Daily files land under <code>$VAULT_PATH/listener/YYYY-MM-DD.md</code></span>
+        </label>
+      </section>
+
+      <!-- Wake word (optional) -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">🔔 Wake word (optional sidecar)</h2>
+        <p class="text-sm text-gray-400 mb-3">Leave blank to transcribe everything. Configure to gate transcription on a wake word.</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="form-control">
+            <span class="label-text mb-1">Sidecar URL</span>
+            <input type="text" name="WAKE_WORD_URL" value="{{index .Values "WAKE_WORD_URL"}}" class="input input-bordered w-full" placeholder="http://localhost:9201">
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Wake words (comma-sep)</span>
+            <input type="text" name="WAKE_WORDS" value="{{index .Values "WAKE_WORDS"}}" class="input input-bordered w-full" placeholder="computer,hermes">
+          </label>
+        </div>
+        <details class="mt-3 text-sm">
+          <summary class="cursor-pointer text-blue-400">▸ Install openWakeWord sidecar</summary>
+          <pre class="bg-black/30 p-3 rounded text-xs overflow-x-auto mt-2"># Quick start (requires Python 3.10+, pip)
+pip install --user openwakeword
+# Or use the dedicated sidecar from 2nd-whisper-brain:
+git clone https://github.com/niski84/2nd-whisper-brain.git ~/wakeword-src
+cd ~/wakeword-src/wake_word_sidecar
+./start.sh   # default port 9201</pre>
+        </details>
+      </section>
+
+      <!-- Speaker filter (optional) -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">👤 Speaker filter (optional sidecar)</h2>
+        <p class="text-sm text-gray-400 mb-3">ECAPA voiceprint matching. Drops clips that don't sound like you — filters family, TV, podcasts.</p>
+        <div class="grid md:grid-cols-3 gap-4">
+          <label class="form-control">
+            <span class="label-text mb-1">Sidecar URL</span>
+            <input type="text" name="SPEAKER_SIDECAR_URL" value="{{index .Values "SPEAKER_SIDECAR_URL"}}" class="input input-bordered w-full" placeholder="http://localhost:9200">
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Min clip duration (s)</span>
+            <input type="number" name="SPEAKER_MIN_CLIP_DURATION" value="{{orDefault (index .Values "SPEAKER_MIN_CLIP_DURATION") "5"}}" class="input input-bordered w-full">
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Cosine threshold</span>
+            <input type="number" step="0.01" name="SPEAKER_THRESHOLD" value="{{orDefault (index .Values "SPEAKER_THRESHOLD") "0.25"}}" class="input input-bordered w-full">
+          </label>
+        </div>
+        <details class="mt-3 text-sm">
+          <summary class="cursor-pointer text-blue-400">▸ Install ECAPA speaker sidecar</summary>
+          <pre class="bg-black/30 p-3 rounded text-xs overflow-x-auto mt-2"># SpeechBrain + FastAPI sidecar from 2nd-whisper-brain
+cd ~/wakeword-src/speaker_sidecar
+pip install --user -r requirements.txt
+./start.sh   # default port 9200
+# Then enroll your voice:
+curl -F "audio=@your-30-second-sample.wav" http://localhost:9200/enroll</pre>
+        </details>
+      </section>
+
+      <!-- TV / Plex filter (optional) -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">📺 TV chatter filter (optional)</h2>
+        <p class="text-sm text-gray-400 mb-3">Drops clips that match what's currently playing on Plex. Solves "movie dialogue leaks into transcript."</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <label class="form-control">
+            <span class="label-text mb-1">Plex base URL</span>
+            <input type="text" name="PLEX_BASE_URL" value="{{index .Values "PLEX_BASE_URL"}}" class="input input-bordered w-full" placeholder="http://localhost:32400">
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Plex token</span>
+            <input type="password" name="PLEX_TOKEN" value="{{index .Values "PLEX_TOKEN"}}" class="input input-bordered w-full">
+          </label>
+        </div>
+      </section>
+
+      <!-- Smart turn (optional) -->
+      <section class="card rounded-lg p-5">
+        <h2 class="text-xl font-semibold mb-3">⏱ Smart turn detection (optional sidecar)</h2>
+        <p class="text-sm text-gray-400 mb-3">End-of-utterance detection — better than silence-only VAD for slow speakers / mid-thought pauses.</p>
+        <label class="form-control">
+          <span class="label-text mb-1">Sidecar URL</span>
+          <input type="text" name="SMART_TURN_URL" value="{{index .Values "SMART_TURN_URL"}}" class="input input-bordered w-full" placeholder="http://localhost:9202">
+        </label>
+      </section>
+
+      <!-- Action bar -->
+      <div class="flex items-center gap-3 sticky bottom-4 bg-black/70 backdrop-blur p-3 rounded-lg">
+        <button type="submit" class="btn btn-primary">💾 Save</button>
+        <button type="button" class="btn btn-outline" @click="restart()">⟲ Restart service</button>
+        <span x-show="message" x-text="message" class="text-sm text-green-400"></span>
+        <span x-show="errorMessage" x-text="errorMessage" class="text-sm text-red-400"></span>
+        <span class="ml-auto text-xs text-gray-500">.env: {{.EnvPath}}</span>
+      </div>
+    </form>
+
+    <!-- Raw view -->
+    <details class="card rounded-lg p-5">
+      <summary class="text-xl font-semibold cursor-pointer">⚙ Raw env values</summary>
+      <pre class="text-xs bg-black/30 p-3 rounded overflow-x-auto mt-3">{{range $k, $v := .Values}}{{$k}}={{$v}}
+{{end}}</pre>
+    </details>
+
+  </main>
+
+  <script>
+    function page() {
+      return {
+        message: '', errorMessage: '', probes: [],
+        async init() { await this.refreshProbes(); },
+        async refreshProbes() {
+          try { this.probes = await (await fetch('/api/probe')).json(); }
+          catch (e) { this.probes = []; }
+        },
+        async saveSettings() {
+          this.message = ''; this.errorMessage = '';
+          const form = document.querySelector('form');
+          const data = new URLSearchParams(new FormData(form));
+          try {
+            const r = await fetch('/api/settings', { method: 'POST', body: data });
+            const j = await r.json();
+            if (r.ok) {
+              this.message = `Saved ${j.saved} value(s). Restart the service for changes to take effect.`;
+              setTimeout(() => this.message = '', 5000);
+            } else {
+              this.errorMessage = j.error || 'save failed';
+            }
+          } catch (e) { this.errorMessage = e.message; }
+        },
+        async restart() {
+          try {
+            const r = await fetch('/api/restart', { method: 'POST' });
+            const j = await r.json();
+            this.message = j.hint || 'restart requested';
+            setTimeout(() => this.message = '', 8000);
+          } catch (e) { this.errorMessage = e.message; }
+        },
+      }
+    }
+  </script>
+</body>
+</html>
