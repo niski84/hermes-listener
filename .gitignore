@@ -1,4 +1,4 @@
-# binary + runtime (root-level only — anchored to repo root with leading slash)
+# binary + runtime
 /hermes-listener
 /hermes-listener.pid
 *.log
@@ -6,6 +6,14 @@
 # secrets — never commit
 .env
 .env.local
+
+# runtime data: audio clips, baselines, channel state
+data/
+!data/.gitkeep
+
+# Python cache (the Hermes plugin is Python)
+__pycache__/
+*.pyc
 
 # build artifacts
 bin/

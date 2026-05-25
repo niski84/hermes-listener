@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"hermes-listener/internal/pipeline"
+	"hermes-listener/internal/pipeline/transcribepool"
 	"hermes-listener/internal/storage"
 )
 
@@ -63,6 +64,22 @@ func SetupAudio(ctx context.Context) (*AudioComponent, error) {
 	}
 	store := &storage.Store{} // stub; pipeline holds it but never invokes it
 
+	// Wire transcribe pool with bounded concurrency. Without this, every
+	// utterance hits whisper-server unbounded — fine for one mic, bad for
+	// multi-channel setups where bursts can stack up dozens of requests.
+	pool := transcribepool.New(transcribepool.Config{
+		Workers:     1,
+		Queue:       4,
+		Transcriber: pipeline.NewWhisperTranscriber(whisperURL),
+	})
+	pool.Start()
+	// Pump pool.Results() forever — without this, whisper results sit
+	// in the channel and the post-transcribe stages (hallucination
+	// filter, transcript writer) never fire. RunTranscribeDispatcher
+	// is the single consumer; it dispatches each result to the
+	// per-clip callback stashed on Utterance.User.
+	go pipeline.RunTranscribeDispatcher(pool)
+
 	mgr := pipeline.NewChannelManager(
 		micDevice,
 		whisperURL,
@@ -73,6 +90,16 @@ func SetupAudio(ctx context.Context) (*AudioComponent, error) {
 		transcript,
 		store,
 	)
+	mgr.SetTranscribePool(pool)
+
+	// Start the default mic channel — addDefault() in NewChannelManager
+	// constructs it but doesn't auto-start. Without this call the channel
+	// sits idle with running=false and never opens the mic.
+	if err := mgr.StartChannel("default"); err != nil {
+		log.Printf("[startup] WARN default mic failed to start: %v (capture won't work; check MIC_DEVICE and PulseAudio)", err)
+	} else {
+		log.Printf("[startup] default mic channel started on device %q", micDevice)
+	}
 
 	log.Printf("[startup] hermes-listener ready: mic=%s whisper=%s vault=%s",
 		micDevice, whisperURL, transcriptDir)
