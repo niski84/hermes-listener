@@ -50,19 +50,35 @@ This repo was extracted from [²nd-whisper-brain](https://github.com/niski84/2nd
 - [ ] install.sh one-liner
 - [ ] GoReleaser CI for prebuilt binaries
 
-## Planned install (when shipped)
+## Install
+
+### One-line (Linux + macOS)
 
 ```bash
-# Easiest: alongside Hermes Agent
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash   # Hermes itself
-curl -fsSL https://raw.githubusercontent.com/niski84/hermes-listener/main/install.sh | bash
-
-# Or build from source
-git clone https://github.com/niski84/hermes-listener.git
-cd hermes-listener && go build ./cmd/hermes-listener
+curl -fsSL https://raw.githubusercontent.com/niski84/hermes-listener/main/scripts/install.sh | bash
 ```
 
-After install, settings live at `http://localhost:9120/` — pick your mic, set the vault path, choose wake words. Listener writes to `~/Documents/vault/listener/YYYY-MM-DD.md` by default. Any agent pointed at that vault sees the transcripts automatically.
+Downloads the latest prebuilt binary from the [GitHub releases](https://github.com/niski84/hermes-listener/releases), drops it in `~/.local/bin/hermes-listener`, installs a systemd user service (Linux), and starts it on `:9120`. Opt-out env vars: `HERMES_LISTENER_NO_SERVICE=1`, `HERMES_LISTENER_NO_START=1`, `HERMES_LISTENER_VERSION=vX.Y.Z`.
+
+### From a release archive
+
+Grab the tarball for your platform from [releases](https://github.com/niski84/hermes-listener/releases) and extract it anywhere — the binary is a single static file.
+
+```bash
+# example
+curl -L https://github.com/niski84/hermes-listener/releases/download/v0.1.0/hermes-listener_0.1.0_linux_amd64.tar.gz | tar xz
+./hermes-listener
+```
+
+### From source
+
+```bash
+git clone https://github.com/niski84/hermes-listener.git
+cd hermes-listener && go build -o hermes-listener ./cmd/hermes-listener
+./hermes-listener
+```
+
+After install, settings live at **http://localhost:9120/** — pick your mic, set the vault path, configure optional sidecars. Listener writes to `$VAULT_PATH/listener/YYYY-MM-DD-transcript.md` by default. Any agent pointed at that vault sees the transcripts automatically.
 
 ## Architecture
 

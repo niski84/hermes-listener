@@ -1,0 +1,98 @@
+# GoReleaser config for hermes-listener.
+#
+# Triggered by pushing a vX.Y.Z tag. The GitHub Action at
+# .github/workflows/release.yml runs `goreleaser release` which builds
+# linux/{amd64,arm64} + darwin/{amd64,arm64} binaries, packages them as
+# tar.gz archives with README + LICENSE, generates checksums, and uploads
+# everything to the GitHub release for that tag.
+#
+# Test locally without publishing:
+#   goreleaser release --snapshot --clean
+#
+# Goreleaser v2 schema.
+
+version: 2
+
+project_name: hermes-listener
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hermes-listener
+    main: ./cmd/hermes-listener
+    binary: hermes-listener
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      # -s -w strips debug symbols; -X stamps version + commit so users
+      # running ./hermes-listener --version see the right tag.
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: hermes-listener
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+      - .env.example
+      - scripts/reload.sh
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - 'merge'
+      - 'Merge pull'
+
+release:
+  github:
+    owner: niski84
+    name: hermes-listener
+  draft: false
+  prerelease: auto
+  header: |
+    ## hermes-listener {{ .Tag }}
+
+    Passive voice listener for AI agents. Mic → whisper → markdown in your Obsidian vault.
+  footer: |
+    ---
+
+    Install:
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/niski84/hermes-listener/main/scripts/install.sh | bash
+    ```
+
+    Or download the binary for your platform from the assets below.
