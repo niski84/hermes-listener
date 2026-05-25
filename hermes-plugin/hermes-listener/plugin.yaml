@@ -1,0 +1,6 @@
+name: hermes-listener
+version: 0.1.0
+description: "Passive voice listener for Hermes — bridges a microphone capture pipeline (whisper.cpp + speaker filter + wake-word) to your Obsidian vault. Adds /listener slash command for status, settings, and control."
+author: "nick (https://github.com/niski84/hermes-listener)"
+homepage: "https://github.com/niski84/hermes-listener"
+license: MIT
