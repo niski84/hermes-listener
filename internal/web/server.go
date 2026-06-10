@@ -80,6 +80,7 @@ type settingsView struct {
 	Now       string
 }
 
+// renderSettings serves the settings UI page, re-read from .env on each render.
 func (sv *Server) renderSettings(w http.ResponseWriter, r *http.Request) {
 	// Re-read from disk on every render so a hand-edited .env shows up
 	// immediately. Cheap operation, file is small.
@@ -100,6 +101,7 @@ func (sv *Server) renderSettings(w http.ResponseWriter, r *http.Request) {
 
 // ─── JSON API ──────────────────────────────────────────────────────────
 
+// health reports service status and per-channel telemetry as JSON.
 func (sv *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"status":   "ok",
@@ -108,11 +110,13 @@ func (sv *Server) health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getSettings returns the current settings as flat JSON, fresh from disk.
 func (sv *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	_ = sv.settings.Reload()
 	writeJSON(w, 200, sv.settings.All())
 }
 
+// saveSettings writes form-encoded setting updates to the .env file.
 func (sv *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "bad form: " + err.Error()})
@@ -140,6 +144,7 @@ type micDevice struct {
 	Name string `json:"name"`
 }
 
+// listMics returns available audio capture devices as JSON.
 func (sv *Server) listMics(w http.ResponseWriter, r *http.Request) {
 	mics, err := listInputDevices()
 	if err != nil {
@@ -250,6 +255,7 @@ type probeResult struct {
 	Err  string `json:"error,omitempty"`
 }
 
+// probeSidecars checks each configured sidecar URL for reachability.
 func (sv *Server) probeSidecars(w http.ResponseWriter, r *http.Request) {
 	probes := []struct {
 		name, key, defaultURL, path string
@@ -287,6 +293,7 @@ func (sv *Server) probeSidecars(w http.ResponseWriter, r *http.Request) {
 
 // ─── restart ──────────────────────────────────────────────────────────
 
+// restart returns a hint for gracefully restarting the service.
 func (sv *Server) restart(w http.ResponseWriter, r *http.Request) {
 	// We don't have authority to restart ourselves cleanly. Best-effort:
 	// if running under systemd-user, the user can `systemctl --user
