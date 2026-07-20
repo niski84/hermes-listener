@@ -16,8 +16,8 @@ if [[ -f "$PID_FILE" ]]; then
   OLD_PID="$(cat "$PID_FILE")"
   kill "$OLD_PID" 2>/dev/null && sleep 0.5 || true
 fi
-# basename match handles both ./binary and /absolute/path invocations
-pkill -f "$(basename "$BINARY")" 2>/dev/null && sleep 0.3 || true
+# Kill by port — safe, won't match this script's own path in cmdline
+fuser -k "${PORT}/tcp" 2>/dev/null && sleep 0.3 || true
 
 echo "[hermes-listener] compiling..."
 cd "$PROJECT_DIR"
